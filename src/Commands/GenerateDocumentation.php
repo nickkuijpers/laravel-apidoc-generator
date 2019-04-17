@@ -46,24 +46,29 @@ class GenerateDocumentation extends Command
      * @return void
      */
     public function handle()
-    {
-        URL::forceRootUrl(config('app.url'));
-        $usingDingoRouter = strtolower(config('apidoc.router')) == 'dingo';
-        if ($usingDingoRouter) {
-            $routes = $this->routeMatcher->getDingoRoutesToBeDocumented(config('apidoc.routes'));
-        } else {
-            $routes = $this->routeMatcher->getLaravelRoutesToBeDocumented(config('apidoc.routes'));
+    {        
+        $apidocs = config('apidoc');
+        foreach($apidocs as $apidoc) {      
+
+            URL::forceRootUrl(config('app.url'));
+            $usingDingoRouter = strtolower($apidoc['router']) == 'dingo';
+              
+            if ($usingDingoRouter) {
+                $routes = $this->routeMatcher->getDingoRoutesToBeDocumented($apidoc['routes']);
+            } else {
+                $routes = $this->routeMatcher->getLaravelRoutesToBeDocumented($apidoc['routes']);
+            }
+                    
+            $generator = new Generator();        
+            $parsedRoutes = $this->processRoutes($generator, $routes);
+            $parsedRoutes = collect($parsedRoutes)->groupBy('group')
+                ->sortBy(static function ($group) {
+                    /* @var $group Collection */
+                    return $group->first()['group'];
+                }, SORT_NATURAL);
+
+            $this->writeMarkdown($parsedRoutes, $apidoc);
         }
-
-        $generator = new Generator();
-        $parsedRoutes = $this->processRoutes($generator, $routes);
-        $parsedRoutes = collect($parsedRoutes)->groupBy('group')
-            ->sortBy(static function ($group) {
-                /* @var $group Collection */
-                return $group->first()['group'];
-            }, SORT_NATURAL);
-
-        $this->writeMarkdown($parsedRoutes);
     }
 
     /**
@@ -71,9 +76,9 @@ class GenerateDocumentation extends Command
      *
      * @return void
      */
-    private function writeMarkdown($parsedRoutes)
+    private function writeMarkdown($parsedRoutes, $apidoc)
     {
-        $outputPath = config('apidoc.output');
+        $outputPath = $apidoc['output'];        
         $targetFile = $outputPath.DIRECTORY_SEPARATOR.'source'.DIRECTORY_SEPARATOR.'index.md';
         $compareFile = $outputPath.DIRECTORY_SEPARATOR.'source'.DIRECTORY_SEPARATOR.'.compare.md';
         $prependFile = $outputPath.DIRECTORY_SEPARATOR.'source'.DIRECTORY_SEPARATOR.'prepend.md';
@@ -81,7 +86,7 @@ class GenerateDocumentation extends Command
 
         $infoText = view('apidoc::partials.info')
             ->with('outputPath', ltrim($outputPath, 'public/'))
-            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection());
+            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection($apidoc));
 
         $parsedRouteOutput = $parsedRoutes->map(function ($routeGroup) {
             return $routeGroup->map(function ($route) {
@@ -139,10 +144,10 @@ class GenerateDocumentation extends Command
             ->with('infoText', $infoText)
             ->with('prependMd', $prependFileContents)
             ->with('appendMd', $appendFileContents)
-            ->with('outputPath', config('apidoc.output'))
-            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection())
+            ->with('outputPath', $apidoc['output'])
+            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection($apidoc))
             ->with('parsedRoutes', $parsedRouteOutput);
-
+            
         if (! is_dir($outputPath)) {
             $documentarian->create($outputPath);
         }
@@ -157,8 +162,8 @@ class GenerateDocumentation extends Command
             ->with('infoText', $infoText)
             ->with('prependMd', $prependFileContents)
             ->with('appendMd', $appendFileContents)
-            ->with('outputPath', config('apidoc.output'))
-            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection())
+            ->with('outputPath', $apidoc['output'])
+            ->with('showPostmanCollectionButton', $this->shouldGeneratePostmanCollection($apidoc))
             ->with('parsedRoutes', $parsedRouteOutput);
 
         file_put_contents($compareFile, $compareMarkdown);
@@ -171,13 +176,13 @@ class GenerateDocumentation extends Command
 
         $this->info('Wrote HTML documentation to: '.$outputPath.'/index.html');
 
-        if ($this->shouldGeneratePostmanCollection()) {
+        if ($this->shouldGeneratePostmanCollection($apidoc)) {
             $this->info('Generating Postman collection');
 
             file_put_contents($outputPath.DIRECTORY_SEPARATOR.'collection.json', $this->generatePostmanCollection($parsedRoutes));
         }
 
-        if ($logo = config('apidoc.logo')) {
+        if ($logo = $apidoc['logo']) {
             copy(
                 $logo,
                 $outputPath.DIRECTORY_SEPARATOR.'images'.DIRECTORY_SEPARATOR.'logo.png'
@@ -268,8 +273,8 @@ class GenerateDocumentation extends Command
      *
      * @return bool
      */
-    private function shouldGeneratePostmanCollection()
-    {
-        return config('apidoc.postman.enabled', is_bool(config('apidoc.postman')) ? config('apidoc.postman') : false);
+    private function shouldGeneratePostmanCollection($apidoc)
+    {        
+        return data_get($apidoc, 'postman.enabled');
     }
 }
